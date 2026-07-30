@@ -60,6 +60,13 @@ const App = (() => {
     if (page === "mypage") { renderMypage(); }
   }
 
+  function togglePw(id, btn) {
+    const input = $("#" + id);
+    if (!input) return;
+    if (input.type === "password") { input.type = "text"; btn.textContent = "🙈"; }
+    else { input.type = "password"; btn.textContent = "👁"; }
+  }
+
   // ═══ 인증 ═══
   async function handleSignup(e) {
     e.preventDefault();
@@ -69,6 +76,7 @@ const App = (() => {
     const p2 = $("#su-p2").value;
     const err = $("#su-err");
     err.textContent = "";
+    err.style.color = "";
     if (pw.length < 6) { err.textContent = "비밀번호는 최소 6자 이상이어야 합니다"; return; }
     if (pw !== p2) { err.textContent = "비밀번호가 일치하지 않습니다"; return; }
     try {
@@ -76,10 +84,19 @@ const App = (() => {
       if (error) throw error;
       if (data.user && !data.session) {
         err.style.color = "var(--pink-d)";
-        err.textContent = "인증 메일이 발송되었습니다. 이메일 확인 후 로그인하세요.";
+        err.textContent = "가입 완료! 이메일함(스팸함 포함)에서 인증 메일을 확인한 후 로그인하세요.";
       }
     } catch (e) {
-      err.textContent = errMsg(e);
+      const m = errMsg(e);
+      if (m.includes("rate limit") || m.includes("over_email_send_rate_limit")) {
+        err.textContent = "이메일 발송 제한에 걸렸습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.";
+      } else if (m.includes("already registered") || m.includes("already been registered")) {
+        err.textContent = "이미 가입된 이메일입니다. 로그인해 주세요.";
+      } else if (m.includes("Invalid email")) {
+        err.textContent = "올바른 이메일 주소를 입력하세요.";
+      } else {
+        err.textContent = m;
+      }
     }
   }
 
@@ -796,7 +813,7 @@ const App = (() => {
   }
 
   return {
-    init, go, closeModal,
+    init, go, closeModal, togglePw,
     handleLogin, handleSignup, doLogout,
     prevPersonalMonth, nextPersonalMonth,
     openPersonalEventModal, addPersonalEvent, deletePersonalEvent, searchPlace,
