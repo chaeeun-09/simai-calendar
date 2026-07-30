@@ -77,9 +77,12 @@ const App = (() => {
     const err = $("#su-err");
     err.textContent = "";
     err.style.color = "";
+    if (!nm) { err.textContent = "이름(닉네임)을 입력하세요"; return; }
     if (pw.length < 6) { err.textContent = "비밀번호는 최소 6자 이상이어야 합니다"; return; }
     if (pw !== p2) { err.textContent = "비밀번호가 일치하지 않습니다"; return; }
     try {
+      const { data: existing } = await sb().from("user_search").select("id").eq("nickname", nm).maybeSingle();
+      if (existing) { err.textContent = "이미 사용 중인 닉네임입니다. 다른 닉네임을 사용하세요."; return; }
       const { data, error } = await sb().auth.signUp({ email: em, password: pw, options: { data: { nickname: nm } } });
       if (error) throw error;
       if (data.user && !data.session) {
@@ -132,11 +135,14 @@ const App = (() => {
           nickname: session.user.user_metadata?.nickname || session.user.email?.split("@")[0] || "사용자"
         };
         try {
-          const { data: profile } = await sb().from("profiles").select("nickname").eq("id", currentUser.id).single();
+          const { data: profile } = await sb().from("profiles").select("nickname,avatar_url").eq("id", currentUser.id).single();
           if (profile?.nickname) currentUser.nickname = profile.nickname;
+          if (profile?.avatar_url) currentUser.avatar_url = profile.avatar_url;
         } catch (e) {}
         if (event === "SIGNED_IN") {
           toast(`${currentUser.nickname}님 환영합니다!`);
+          go("main");
+        } else if (event === "INITIAL_SESSION") {
           go("main");
         }
       } else {
