@@ -60,6 +60,10 @@ const App = (() => {
     if (page === "mypage") { renderMypage(); }
   }
 
+  function logoClick() {
+    go(currentUser ? "main" : "landing");
+  }
+
   function togglePw(id, btn) {
     const input = $("#" + id);
     if (!input) return;
@@ -524,12 +528,14 @@ const App = (() => {
     const el = $("#room-member-list");
     if (!el) return;
     const memberIds = roomMembers.map(m => m.user_id);
-    const { data: profiles } = await sb().from("profiles").select("id,nickname").in("id", memberIds);
+    if (!memberIds.length) { el.innerHTML = `<div class="empty">멤버가 없습니다</div>`; return; }
+    const { data: profiles } = await sb().from("profiles").select("id,nickname,avatar_url").in("id", memberIds);
     el.innerHTML = (profiles || []).map(p => {
       const initial = (p.nickname || "?")[0].toUpperCase();
       const colors = ["#FFD1DC","#a0c4ff","#b5ead7","#ffd6a5","#c5b5ff"];
       const idx = memberIds.indexOf(p.id) % colors.length;
-      return `<div class="friend-item"><div class="friend-av" style="background:${colors[idx]}">${escapeHtml(initial)}</div><div class="friend-name">${escapeHtml(p.nickname || "사용자")}</div></div>`;
+      const avInner = p.avatar_url ? `<img src="${p.avatar_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : escapeHtml(initial);
+      return `<div class="friend-item"><div class="friend-av" style="background:${colors[idx]}">${avInner}</div><div class="friend-name">${escapeHtml(p.nickname || "사용자")}</div></div>`;
     }).join("");
   }
 
@@ -706,12 +712,17 @@ const App = (() => {
     e.preventDefault();
     const newName = $("#mp-newname").value.trim();
     if (!newName) { toast("이름을 입력하세요"); return; }
+    if (newName === currentUser.nickname) { toast("현재 이름과 같습니다"); return; }
     try {
-      const { error } = await sb().from("profiles").update({ nickname: newName }).eq("id", currentUser.id);
-      if (error) throw error;
+      const { data: existing } = await sb().from("profiles").select("id").eq("nickname", newName).neq("id", currentUser.id).maybeSingle();
+      if (existing) { toast("이미 사용 중인 닉네임입니다"); return; }
+      const { error: pErr } = await sb().from("profiles").update({ nickname: newName }).eq("id", currentUser.id);
+      if (pErr) throw pErr;
+      await sb().auth.updateUser({ data: { nickname: newName } });
       currentUser.nickname = newName;
-      $("#mp-avatar").textContent = newName[0].toUpperCase();
+      if (!currentUser.avatar_url) $("#mp-avatar").textContent = newName[0].toUpperCase();
       $("#mp-name").textContent = newName;
+      $("#mp-newname").value = "";
       toast("이름이 변경되었습니다");
     } catch (e) { toast(errMsg(e)); }
   }
@@ -720,25 +731,58 @@ const App = (() => {
   async function renderFriends() {
     const el = $("#friend-list");
     const reqEl = $("#friend-requests");
+    const colors = ["#FFD1DC","#a0c4ff","#b5ead7","#ffd6a5","#c5b5ff"];
     try {
-      const { data: friends } = await sb().from("friends").select("*,friend_id").or(`user_id.eq.${currentUser.id},friend_id.eq.${currentUser.id}`);
+      const { data: friends, error: fErr } = await sb().from("friends")
+        .select("*").or(`user_id.eq.${currentUser.id},friend_id.eq.${currentUser.id}`);
+      if (fErr) throw fErr;
       const accepted = (friends || []).filter(f => f.status === "accepted");
       const pending = (friends || []).filter(f => f.status === "pending" && f.friend_id === currentUser.id);
+      const sentPending = (friends || []).filter(f => f.status === "pending" && f.user_id === currentUser.id);
 
-      const allIds = [...new Set([...accepted.map(f => f.user_id === currentUser.id ? f.friend_id : f.user_id), ...pending.map(f => f.user_id)])];
-      const { data: profiles } = await sb().from("profiles").select("id,nickname").in("id", allIds);
+      const allIds = [...new Set([
+        ...accepted.map(f => f.user_id === currentUser.id ? f.friend_id : f.user_id),
+        ...pending.map(f => f.user_id),
+        ...sentPending.map(f => f.friend_id)
+      ])];
       const pMap = {};
-      (profiles || []).forEach(p => pMap[p.id] = p.nickname || "사용자");
+      if (allIds.length > 0) {
+        const { data: profiles } = await sb().from("profiles").select("id,nickname,avatar_url").in("id", allIds);
+        (profiles || []).forEach(p => pMap[p.id] = { name: p.nickname || "사용자", avatar: p.avatar_url });
+      }
+
+      const makeAv = (id) => {
+        const info = pMap[id] || { name: "?", avatar: null };
+        const initial = (info.name || "?")[0].toUpperCase();
+        const color = colors[Math.abs(id.charCodeAt(0)) % colors.length];
+        return info.avatar
+          ? `<img src="${info.avatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
+          : escapeHtml(initial);
+      };
+      const getColor = (id) => colors[Math.abs(id.charCodeAt(0)) % colors.length];
 
       el.innerHTML = accepted.length ? accepted.map(f => {
         const fid = f.user_id === currentUser.id ? f.friend_id : f.user_id;
-        const initial = (pMap[fid] || "?")[0].toUpperCase();
-        const colors = ["#FFD1DC","#a0c4ff","#b5ead7","#ffd6a5","#c5b5ff"];
-        return `<div class="friend-item"><div class="friend-av" style="background:${colors[Math.floor(Math.random()*colors.length)]}">${escapeHtml(initial)}</div><div class="friend-name">${escapeHtml(pMap[fid])}</div><span class="friend-status accepted">친구</span></div>`;
-      }).join("") : `<div class="empty">아직 친구가 없어요</div>`;
+        const info = pMap[fid] || { name: "사용자" };
+        return `<div class="friend-item"><div class="friend-av" style="background:${getColor(fid)}">${makeAv(fid)}</div><div class="friend-name">${escapeHtml(info.name)}</div><span class="friend-status accepted">친구</span></div>`;
+      }).join("") : `<div class="empty">아직 친구가 없어요<br>닉네임으로 친구를 찾아보세요!</div>`;
 
-      reqEl.innerHTML = pending.length ? `<div style="margin-top:16px"><strong style="font-size:13px;color:var(--sub)">받은 요청</strong>${pending.map(f => `
-        <div class="friend-item"><div class="friend-name">${escapeHtml(pMap[f.user_id])}</div><button class="btn-accept" onclick="App.acceptFriend('${f.id}')">수락</button></div>`).join("")}</div>` : "";
+      let reqHtml = "";
+      if (pending.length > 0) {
+        reqHtml += `<div style="margin-top:16px"><strong style="font-size:13px;color:var(--sub)">받은 친구 요청 (${pending.length})</strong>`;
+        reqHtml += pending.map(f => {
+          const info = pMap[f.user_id] || { name: "사용자" };
+          return `<div class="friend-item"><div class="friend-av" style="background:${getColor(f.user_id)}">${makeAv(f.user_id)}</div><div class="friend-name">${escapeHtml(info.name)}</div><button class="btn-accept" onclick="App.acceptFriend('${f.id}')">수락</button></div>`;
+        }).join("") + `</div>`;
+      }
+      if (sentPending.length > 0) {
+        reqHtml += `<div style="margin-top:16px"><strong style="font-size:13px;color:var(--sub)">보낸 요청 (${sentPending.length})</strong>`;
+        reqHtml += sentPending.map(f => {
+          const info = pMap[f.friend_id] || { name: "사용자" };
+          return `<div class="friend-item"><div class="friend-name">${escapeHtml(info.name)}</div><span class="friend-status pending">대기 중</span></div>`;
+        }).join("") + `</div>`;
+      }
+      reqEl.innerHTML = reqHtml;
     } catch (e) { el.innerHTML = `<div class="empty">${errMsg(e)}</div>`; }
   }
 
@@ -820,7 +864,7 @@ const App = (() => {
   }
 
   return {
-    init, go, closeModal, togglePw,
+    init, go, logoClick, closeModal, togglePw,
     handleLogin, handleSignup, doLogout,
     prevPersonalMonth, nextPersonalMonth,
     openPersonalEventModal, addPersonalEvent, deletePersonalEvent, searchPlace,
