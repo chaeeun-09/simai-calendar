@@ -83,8 +83,8 @@ const App = (() => {
       const { data, error } = await sb().auth.signUp({ email: em, password: pw, options: { data: { nickname: nm } } });
       if (error) throw error;
       if (data.user && !data.session) {
-        err.style.color = "var(--pink-d)";
-        err.textContent = "가입 완료! 이메일함(스팸함 포함)에서 인증 메일을 확인한 후 로그인하세요.";
+        err.style.color = "#0a8a40";
+        err.textContent = "가입 완료! 바로 로그인할 수 있습니다.";
       }
     } catch (e) {
       const m = errMsg(e);
