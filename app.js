@@ -812,7 +812,7 @@ const App = (() => {
       el.innerHTML = accepted.length ? accepted.map(f => {
         const fid = f.user_id === currentUser.id ? f.friend_id : f.user_id;
         const info = pMap[fid] || { name: "사용자" };
-        return `<div class="friend-item"><div class="friend-av" style="background:${getColor(fid)}">${makeAv(fid)}</div><div class="friend-name">${escapeHtml(info.name)}</div><span class="friend-status accepted">친구</span></div>`;
+        return `<div class="friend-item" style="cursor:pointer" onclick="App.viewFriendCal('${fid}','${escapeHtml(info.name)}')"><div class="friend-av" style="background:${getColor(fid)}">${makeAv(fid)}</div><div class="friend-name">${escapeHtml(info.name)}<div style="font-size:11px;color:var(--sub);font-weight:400;margin-top:2px">📅 캘린더 보기</div></div><span class="friend-status accepted">친구</span></div>`;
       }).join("") : `<div class="empty">아직 친구가 없어요<br>닉네임으로 친구를 찾아보세요!</div>`;
 
       let reqHtml = "";
@@ -833,6 +833,86 @@ const App = (() => {
       reqEl.innerHTML = reqHtml;
     } catch (e) { el.innerHTML = `<div class="empty">${errMsg(e)}</div>`; }
   }
+
+  let friendCalMonth = new Date();
+
+  async function viewFriendCal(friendId, friendName) {
+    friendCalMonth = new Date();
+    openModal(`📅 ${friendName}님의 캘린더`, `
+      <div class="modal-body">
+        <div class="mc-nav">
+          <button class="mc-nav-btn" onclick="App.prevFriendMonth('${friendId}','${escapeHtml(friendName)}')">‹</button>
+          <div class="mc-title" id="fc-title"></div>
+          <button class="mc-nav-btn" onclick="App.nextFriendMonth('${friendId}','${escapeHtml(friendName)}')">›</button>
+        </div>
+        <div class="mc-grid" id="fc-grid"></div>
+        <div id="fc-events" style="margin-top:16px"></div>
+        <button class="modal-close" onclick="App.closeModal()">닫기</button>
+      </div>`);
+    await renderFriendCal(friendId, friendName);
+  }
+
+  async function renderFriendCal(friendId, friendName) {
+    const y = friendCalMonth.getFullYear(), m = friendCalMonth.getMonth();
+    const firstDay = new Date(y, m, 1).getDay();
+    const lastDate = new Date(y, m + 1, 0).getDate();
+    const prevLast = new Date(y, m, 0).getDate();
+    const today = new Date();
+    $("#fc-title").textContent = `${y}.${MPAD(m+1)}`;
+
+    const monthStart = `${y}-${MPAD(m+1)}-01`;
+    const monthEnd = `${y}-${MPAD(m+1)}-${MPAD(lastDate)}`;
+    let events = [];
+    try {
+      const { data } = await sb().from("personal_events").select("*").eq("user_id", friendId)
+        .lte("event_date", monthEnd).gte("event_date", monthStart);
+      events = data || [];
+    } catch (e) {}
+
+    const evMap = {};
+    events.forEach(ev => {
+      const start = new Date(ev.event_date);
+      const end = new Date(ev.end_date || ev.event_date);
+      for (let d = start.getDate(); d <= end.getDate(); d++) {
+        if (!evMap[d]) evMap[d] = [];
+        evMap[d].push(ev);
+      }
+    });
+
+    let html = DOWS.map(d => `<div class="mc-wd">${d}</div>`).join("");
+    const cells = [];
+    for (let i = firstDay - 1; i >= 0; i--) cells.push({ d: prevLast - i, cur: false });
+    for (let i = 1; i <= lastDate; i++) cells.push({ d: i, cur: true });
+    while (cells.length % 7 !== 0) cells.push({ d: cells.length - firstDay - lastDate + 1, cur: false });
+
+    cells.forEach(c => {
+      let cls = "mc-day";
+      if (!c.cur) cls += " other";
+      const isToday = c.cur && y === today.getFullYear() && m === today.getMonth() && c.d === today.getDate();
+      if (isToday) cls += " today";
+      const evs = c.cur ? (evMap[c.d] || []) : [];
+      const badges = evs.slice(0, 2).map(ev => `<div class="mc-ev-badge pink">${escapeHtml(ev.title.length > 8 ? ev.title.slice(0,8)+"…" : ev.title)}</div>`).join("");
+      html += `<div class="${cls}"><span class="mc-dn">${c.d}</span>${badges}</div>`;
+    });
+
+    $("#fc-grid").innerHTML = html;
+
+    const upcoming = events.filter(ev => new Date(ev.event_date) >= today).slice(0, 5);
+    const evEl = $("#fc-events");
+    if (!upcoming.length) {
+      evEl.innerHTML = `<div class="empty">다가오는 일정이 없어요</div>`;
+    } else {
+      evEl.innerHTML = `<strong style="font-size:12px;color:var(--sub);display:block;margin-bottom:10px">다가오는 일정</strong><div class="ev-cards">${upcoming.map(ev => {
+        const d = new Date(ev.event_date);
+        const isMulti = ev.end_date && ev.end_date !== ev.event_date;
+        const range = isMulti ? `${ev.event_date.slice(5)} ~ ${ev.end_date.slice(5)}` : ev.event_date.slice(5);
+        return `<div class="ecard"><div class="ecard-l"><div class="ecard-day">${d.getDate()}</div><div class="ecard-dow">${DOWS[d.getDay()]}</div></div><div class="ecard-r"><div class="ecard-title">${escapeHtml(ev.title)}</div><div class="ecard-meta">${range}${ev.location ? " · " + escapeHtml(ev.location) : ""}</div></div></div>`;
+      }).join("")}</div>`;
+    }
+  }
+
+  function prevFriendMonth(id, name) { friendCalMonth = new Date(friendCalMonth.getFullYear(), friendCalMonth.getMonth() - 1, 1); renderFriendCal(id, name); }
+  function nextFriendMonth(id, name) { friendCalMonth = new Date(friendCalMonth.getFullYear(), friendCalMonth.getMonth() + 1, 1); renderFriendCal(id, name); }
 
   function openAddFriendModal() {
     openModal("친구 추가", `
@@ -920,6 +1000,7 @@ const App = (() => {
     openEventForm, addRoomEvent, searchEventPlace,
     openInviteModal, searchUsers, inviteById, acceptRoomInvite, declineRoomInvite,
     updateProfile, triggerAvatarUpload, openAddFriendModal, addFriendById, acceptFriend,
+    viewFriendCal, prevFriendMonth, nextFriendMonth,
     renderFriends
   };
 })();
