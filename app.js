@@ -168,18 +168,24 @@ const App = (() => {
     const el = $("#room-invites");
     if (!el) return;
     try {
-      const { data: invites } = await sb().from("room_members").select("room_id,id").eq("user_id", currentUser.id).eq("status", "pending");
+      const { data: invites, error: iErr } = await sb().from("room_members")
+        .select("room_id,id").eq("user_id", currentUser.id).eq("status", "pending");
+      if (iErr) throw iErr;
       if (!invites || invites.length === 0) { el.innerHTML = ""; return; }
       const roomIds = invites.map(i => i.room_id);
-      const { data: rooms } = await sb().from("calendar_rooms").select("id,name,owner_id").in("id", roomIds);
+      const { data: rooms, error: rErr } = await sb().from("calendar_rooms")
+        .select("id,name,owner_id").in("id", roomIds);
+      if (rErr) throw rErr;
       const ownerIds = [...new Set((rooms || []).map(r => r.owner_id))];
-      const { data: ownerProfiles } = await sb().from("profiles").select("id,nickname").in("id", ownerIds);
-      const oMap = {};
-      (ownerProfiles || []).forEach(p => oMap[p.id] = p.nickname || "사용자");
+      let oMap = {};
+      if (ownerIds.length > 0) {
+        const { data: ownerProfiles } = await sb().from("profiles").select("id,nickname").in("id", ownerIds);
+        (ownerProfiles || []).forEach(p => oMap[p.id] = p.nickname || "사용자");
+      }
       const inviteMap = {};
       invites.forEach(i => inviteMap[i.room_id] = i.id);
-      el.innerHTML = `<div style="margin-bottom:12px">${(rooms || []).map(r => `
-        <div class="room-card" style="border-color:var(--pink);background:var(--pink-bg)">
+      el.innerHTML = (rooms || []).map(r => `
+        <div class="room-card" style="border-color:var(--pink);background:var(--pink-bg);margin-bottom:12px">
           <div class="room-card-top">
             <div class="room-card-name">📨 ${escapeHtml(r.name)}</div>
           </div>
@@ -188,8 +194,11 @@ const App = (() => {
             <button class="btn btn-pink btn-sm" onclick="App.acceptRoomInvite('${inviteMap[r.id]}','${r.id}')">수락</button>
             <button class="btn btn-ghost btn-sm" onclick="App.declineRoomInvite('${inviteMap[r.id]}')">거절</button>
           </div>
-        </div>`).join("")}</div>`;
-    } catch (e) { el.innerHTML = ""; }
+        </div>`).join("");
+    } catch (e) {
+      console.error("renderRoomInvites error:", e);
+      el.innerHTML = "";
+    }
   }
 
   async function acceptRoomInvite(memberId, roomId) {
