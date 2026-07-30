@@ -160,7 +160,55 @@ const App = (() => {
   async function renderMain() {
     renderPersonalCal();
     await renderPersonalEvents();
+    await renderRoomInvites();
     await renderRoomList();
+  }
+
+  async function renderRoomInvites() {
+    const el = $("#room-invites");
+    if (!el) return;
+    try {
+      const { data: invites } = await sb().from("room_members").select("room_id,id").eq("user_id", currentUser.id).eq("status", "pending");
+      if (!invites || invites.length === 0) { el.innerHTML = ""; return; }
+      const roomIds = invites.map(i => i.room_id);
+      const { data: rooms } = await sb().from("calendar_rooms").select("id,name,owner_id").in("id", roomIds);
+      const ownerIds = [...new Set((rooms || []).map(r => r.owner_id))];
+      const { data: ownerProfiles } = await sb().from("profiles").select("id,nickname").in("id", ownerIds);
+      const oMap = {};
+      (ownerProfiles || []).forEach(p => oMap[p.id] = p.nickname || "사용자");
+      const inviteMap = {};
+      invites.forEach(i => inviteMap[i.room_id] = i.id);
+      el.innerHTML = `<div style="margin-bottom:12px">${(rooms || []).map(r => `
+        <div class="room-card" style="border-color:var(--pink);background:var(--pink-bg)">
+          <div class="room-card-top">
+            <div class="room-card-name">📨 ${escapeHtml(r.name)}</div>
+          </div>
+          <div class="room-card-meta">${escapeHtml(oMap[r.owner_id] || "사용자")}님이 초대했어요</div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-pink btn-sm" onclick="App.acceptRoomInvite('${inviteMap[r.id]}','${r.id}')">수락</button>
+            <button class="btn btn-ghost btn-sm" onclick="App.declineRoomInvite('${inviteMap[r.id]}')">거절</button>
+          </div>
+        </div>`).join("")}</div>`;
+    } catch (e) { el.innerHTML = ""; }
+  }
+
+  async function acceptRoomInvite(memberId, roomId) {
+    try {
+      const { error } = await sb().from("room_members").update({ status: "accepted" }).eq("id", memberId);
+      if (error) throw error;
+      toast("초대를 수락했습니다");
+      await renderRoomInvites();
+      await renderRoomList();
+    } catch (e) { toast(errMsg(e)); }
+  }
+
+  async function declineRoomInvite(memberId) {
+    try {
+      const { error } = await sb().from("room_members").delete().eq("id", memberId);
+      if (error) throw error;
+      toast("초대를 거절했습니다");
+      await renderRoomInvites();
+    } catch (e) { toast(errMsg(e)); }
   }
 
   // ─── 개인 캘린더 ───
@@ -354,7 +402,7 @@ const App = (() => {
     const el = $("#room-list");
     if (!el) return;
     try {
-      const { data: members } = await sb().from("room_members").select("room_id").eq("user_id", currentUser.id);
+      const { data: members } = await sb().from("room_members").select("room_id").eq("user_id", currentUser.id).eq("status", "accepted");
       const roomIds = (members || []).map(m => m.room_id);
       if (roomIds.length === 0) { el.innerHTML = `<div class="empty">참여 중인 공유 캘린더가 없어요<br>방을 만들어 친구를 초대해보세요!</div>`; return; }
       const { data: rooms, error } = await sb().from("calendar_rooms").select("*").in("id", roomIds).order("created_at", { ascending: false });
@@ -413,7 +461,7 @@ const App = (() => {
     try {
       const { data: room } = await sb().from("calendar_rooms").select("*").eq("id", currentRoom).single();
       if (room) { $("#room-name").textContent = room.name; }
-      const { data: members } = await sb().from("room_members").select("user_id").eq("room_id", currentRoom);
+      const { data: members } = await sb().from("room_members").select("user_id").eq("room_id", currentRoom).eq("status", "accepted");
       roomMembers = members || [];
       $("#room-meta").textContent = `멤버 ${roomMembers.length}명`;
       const memberIds = roomMembers.map(m => m.user_id);
@@ -831,15 +879,14 @@ const App = (() => {
 
   async function inviteById(id, name) {
     try {
-      const { error } = await sb().from("room_members").insert({ room_id: currentRoom, user_id: id });
+      const { error } = await sb().from("room_members").insert({ room_id: currentRoom, user_id: id, status: "pending" });
       if (error) {
-        if (error.message.includes("duplicate")) toast("이미 멤버입니다");
+        if (error.message.includes("duplicate")) toast("이미 초대했거나 멤버입니다");
         else throw error;
         return;
       }
-      toast(`${name}님을 초대했습니다`);
+      toast(`${name}님에게 초대를 보냈습니다`);
       closeModal();
-      await loadRoomData();
     } catch (e) { toast(errMsg(e)); }
   }
 
@@ -871,7 +918,7 @@ const App = (() => {
     openCreateRoomModal, createRoom, enterRoom,
     prevRoomMonth, nextRoomMonth, switchRoomTab,
     openEventForm, addRoomEvent, searchEventPlace,
-    openInviteModal, searchUsers, inviteById,
+    openInviteModal, searchUsers, inviteById, acceptRoomInvite, declineRoomInvite,
     updateProfile, triggerAvatarUpload, openAddFriendModal, addFriendById, acceptFriend,
     renderFriends
   };
