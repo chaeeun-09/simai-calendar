@@ -802,9 +802,7 @@ const App = (() => {
     openPersonalEventModal, addPersonalEvent, deletePersonalEvent, searchPlace,
     openCreateRoomModal, createRoom, enterRoom,
     prevRoomMonth, nextRoomMonth, switchRoomTab,
-    onDayClick: null,
     openEventForm, addRoomEvent, searchEventPlace,
-    openInviteModal, inviteFriend,
     openInviteModal, searchUsers, inviteById,
     updateProfile, triggerAvatarUpload, openAddFriendModal, addFriendById, acceptFriend,
     renderFriends
