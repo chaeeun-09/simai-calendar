@@ -413,12 +413,13 @@ const App = (() => {
       roomMembers = members || [];
       $("#room-meta").textContent = `멤버 ${roomMembers.length}명`;
       const memberIds = roomMembers.map(m => m.user_id);
-      const { data: profiles } = await sb().from("profiles").select("id,nickname").in("id", memberIds);
+      const { data: profiles } = await sb().from("profiles").select("id,nickname,avatar_url").in("id", memberIds.length ? memberIds : ["00000000-0000-0000-0000-000000000000"]);
       const avs = (profiles || []).map(p => {
         const initial = (p.nickname || "?")[0].toUpperCase();
         const colors = ["#FFD1DC","#a0c4ff","#b5ead7","#ffd6a5","#c5b5ff"];
         const idx = memberIds.indexOf(p.id) % colors.length;
-        return `<div class="sav" style="background:${colors[idx]}" title="${escapeHtml(p.nickname)}">${escapeHtml(initial)}</div>`;
+        const avInner = p.avatar_url ? `<img src="${p.avatar_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : escapeHtml(initial);
+        return `<div class="sav" style="background:${colors[idx]}" title="${escapeHtml(p.nickname)}">${avInner}</div>`;
       }).join("");
       $("#room-members").innerHTML = avs + `<button class="sav-add" onclick="App.openInviteModal()">+</button>`;
 
